@@ -2,24 +2,23 @@
 
 import { useEffect, useState } from "react";
 
-export default function Countdown() {
-  const [count, setCount] = useState(3);
+export default function Countdown({ until }: { until: number }) {
+  const [remaining, setRemaining] = useState(() => Math.ceil((until - Date.now()) / 1000));
 
   useEffect(() => {
-    setCount(3);
-    const interval = setInterval(() => {
-      setCount((c) => (c > 1 ? c - 1 : c));
-    }, 1000);
+    const tick = () => setRemaining(Math.max(1, Math.ceil((until - Date.now()) / 1000)));
+    tick();
+    const interval = setInterval(tick, 200);
     return () => clearInterval(interval);
-  }, []);
+  }, [until]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div
-        key={count}
+        key={remaining}
         className="animate-pop-in flex h-40 w-40 items-center justify-center rounded-full bg-white text-7xl font-bold text-[var(--accent)] shadow-2xl"
       >
-        {count}
+        {remaining}
       </div>
     </div>
   );

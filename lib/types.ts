@@ -1,4 +1,4 @@
-export type Phase = "lobby" | "picking" | "countdown" | "active" | "gameover";
+export type Phase = "lobby" | "picking" | "active" | "gameover";
 
 export interface GameConfig {
   numberRange: number; // numbers 1..numberRange scattered on the board
@@ -20,9 +20,11 @@ export interface RoomState {
   runnerId: string | null;
   seekerId: string | null;
   target: number | null;
-  boards: Record<string, number[]>; // playerId -> scattered numbers (0 = empty cell)
+  countdownUntil: number | null; // ms epoch; while now < this, round hasn't "really" started yet
+  boards: Record<string, number[]>; // playerId -> scattered numbers, a permutation of 1..numberRange
   grids: Record<string, boolean[]>; // playerId -> crossed squares
   winnerId: string | null;
+  updatedAt: number;
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -30,3 +32,9 @@ export const DEFAULT_CONFIG: GameConfig = {
   gridSize: 25,
   reshuffle: false,
 };
+
+export const COUNTDOWN_MS = 3000;
+export const MIN_NUMBER_RANGE = 4;
+export const MAX_NUMBER_RANGE = 500;
+export const MIN_GRID_SIZE = 4;
+export const MAX_GRID_SIZE = 500;

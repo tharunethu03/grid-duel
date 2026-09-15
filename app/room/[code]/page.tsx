@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useRoom } from "@/lib/RoomContext";
 import ScatterBoard from "@/components/ScatterBoard";
@@ -19,6 +19,7 @@ export default function RoomPage() {
     setPlayerName,
     error,
     clearError,
+    connect,
     joinRoom,
     updateConfig,
     startGame,
@@ -32,23 +33,45 @@ export default function RoomPage() {
   const [joining, setJoining] = useState(false);
   const [nameInput, setNameInput] = useState(playerName);
   const [wrongValue, setWrongValue] = useState<number | null>(null);
+  const [revealed, setRevealed] = useState(true);
 
-  const inRoom = state?.code === code;
+  useEffect(() => {
+    connect(code);
+  }, [code, connect]);
 
   useEffect(() => {
     setNameInput(playerName);
   }, [playerName]);
 
+  const isMember = useMemo(
+    () => !!state && !!playerId && state.players.some((p) => p.id === playerId),
+    [state, playerId]
+  );
+
+  useEffect(() => {
+    if (state?.phase !== "active" || !state.countdownUntil) {
+      setRevealed(true);
+      return;
+    }
+    const remaining = state.countdownUntil - Date.now();
+    if (remaining <= 0) {
+      setRevealed(true);
+      return;
+    }
+    setRevealed(false);
+    const t = setTimeout(() => setRevealed(true), remaining);
+    return () => clearTimeout(t);
+  }, [state?.phase, state?.countdownUntil]);
+
   const handleJoin = async () => {
     if (!nameInput.trim()) return;
     setJoining(true);
     setPlayerName(nameInput);
-    const ack = await joinRoom(code, nameInput);
+    await joinRoom(code, nameInput);
     setJoining(false);
-    if (!ack.ok) return;
   };
 
-  if (!inRoom) {
+  if (!state || !isMember) {
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="card w-full max-w-sm p-6 flex flex-col gap-4">
@@ -93,6 +116,7 @@ export default function RoomPage() {
   const myGrid = playerId ? state.grids[playerId] : undefined;
   const myBoard = playerId ? state.boards[playerId] : undefined;
   const opponentGrid = opponent ? state.grids[opponent.id] : undefined;
+  const showCountdown = state.phase === "active" && !!state.countdownUntil && !revealed;
 
   const handleWrongClick = (value: number) => {
     setWrongValue(value);
@@ -101,7 +125,7 @@ export default function RoomPage() {
 
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 gap-6 w-full max-w-2xl mx-auto">
-      {state.phase === "countdown" && <Countdown />}
+      {showCountdown && state.countdownUntil && <Countdown until={state.countdownUntil} />}
 
       <div className="flex items-center justify-between w-full">
         <div>
@@ -205,7 +229,7 @@ export default function RoomPage() {
               <p className="text-sm text-[var(--muted)]">
                 {myGrid.filter(Boolean).length} / {myGrid.length} crossed
               </p>
-              <CrossGrid grid={myGrid} onSquareClick={crossSquare} />
+              <CrossGrid grid={myGrid} onSquareClick={crossSquare} disabled={!revealed} />
             </>
           )}
           {isSeeker && myBoard && (
@@ -225,6 +249,7 @@ export default function RoomPage() {
               <ScatterBoard
                 board={myBoard}
                 wrongValue={wrongValue}
+                disabled={!revealed}
                 onTileClick={(value) => {
                   if (value === state.target) foundNumber();
                   else handleWrongClick(value);

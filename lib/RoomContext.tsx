@@ -1,14 +1,8 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { io, Socket } from "socket.io-client";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
+import type { Channel } from "pusher-js";
+import { getPusherClient } from "./pusherClient";
 import type { GameConfig, RoomState } from "./types";
 
 interface Ack {
@@ -18,6 +12,23 @@ interface Ack {
   error?: string;
 }
 
+function playerKey(code: string) {
+  return `gd-player-${code}`;
+}
+
+async function api(action: string, body: Record<string, unknown> = {}): Promise<Ack> {
+  try {
+    const res = await fetch(`/api/room/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as Ack;
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
 interface RoomContextValue {
   state: RoomState | null;
   playerId: string | null;
@@ -25,6 +36,7 @@ interface RoomContextValue {
   setPlayerName: (name: string) => void;
   error: string | null;
   clearError: () => void;
+  connect: (code: string) => void;
   createRoom: (name: string) => Promise<Ack>;
   joinRoom: (code: string, name: string) => Promise<Ack>;
   updateConfig: (config: Partial<GameConfig>) => void;
@@ -39,82 +51,100 @@ interface RoomContextValue {
 const RoomContext = createContext<RoomContextValue | null>(null);
 
 export function RoomProvider({ children }: { children: React.ReactNode }) {
-  const socketRef = useRef<Socket | null>(null);
   const [state, setState] = useState<RoomState | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
-  const [playerName, setPlayerNameState] = useState("");
+  const [playerName, setPlayerNameState] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("gd-name") || "" : ""
+  );
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const saved = typeof window !== "undefined" ? localStorage.getItem("gd-name") : null;
-    if (saved) setPlayerNameState(saved);
-  }, []);
+  const channelRef = useRef<Channel | null>(null);
+  const codeRef = useRef<string | null>(null);
 
   const setPlayerName = useCallback((name: string) => {
     setPlayerNameState(name);
     if (typeof window !== "undefined") localStorage.setItem("gd-name", name);
   }, []);
 
-  const getSocket = useCallback(() => {
-    if (!socketRef.current) {
-      const socket = io({ path: "/socket.io" });
-      socket.on("room-state", (s: RoomState) => {
-        setState(s);
-        setPlayerId(socket.id ?? null);
-      });
-      socket.on("connect", () => setPlayerId(socket.id ?? null));
-      socketRef.current = socket;
+  const teardown = useCallback(() => {
+    if (channelRef.current && codeRef.current) {
+      channelRef.current.unbind_all();
+      getPusherClient().unsubscribe(`room-${codeRef.current}`);
     }
-    return socketRef.current;
+    channelRef.current = null;
   }, []);
 
-  useEffect(() => {
-    getSocket();
-  }, [getSocket]);
+  const connect = useCallback(
+    (rawCode: string) => {
+      const code = rawCode.toUpperCase();
+      if (codeRef.current === code && channelRef.current) return;
+      teardown();
+      codeRef.current = code;
 
-  const createRoom = useCallback(
-    (name: string) =>
-      new Promise<Ack>((resolve) => {
-        getSocket().emit("create-room", { name }, (ack: Ack) => {
-          if (ack.playerId) setPlayerId(ack.playerId);
-          if (!ack.ok && ack.error) setError(ack.error);
-          resolve(ack);
-        });
-      }),
-    [getSocket]
+      const saved = typeof window !== "undefined" ? localStorage.getItem(playerKey(code)) : null;
+      if (saved) setPlayerId(saved);
+
+      fetch(`/api/room/state?code=${code}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.ok) {
+            setState(data.room);
+            setError(null);
+          } else {
+            setError(data.error || "Room not found");
+          }
+        })
+        .catch(() => setError("Network error"));
+
+      const channel = getPusherClient().subscribe(`room-${code}`);
+      channel.bind("room-state", (room: RoomState) => setState(room));
+      channelRef.current = channel;
+    },
+    [teardown]
   );
 
-  const joinRoom = useCallback(
-    (code: string, name: string) =>
-      new Promise<Ack>((resolve) => {
-        getSocket().emit("join-room", { code, name }, (ack: Ack) => {
-          if (ack.playerId) setPlayerId(ack.playerId);
-          if (!ack.ok && ack.error) setError(ack.error);
-          resolve(ack);
-        });
-      }),
-    [getSocket]
+  const createRoom = useCallback(async (name: string) => {
+    const ack = await api("create", { name });
+    if (ack.ok && ack.code && ack.playerId) {
+      localStorage.setItem(playerKey(ack.code), ack.playerId);
+      setPlayerId(ack.playerId);
+    } else if (ack.error) setError(ack.error);
+    return ack;
+  }, []);
+
+  const joinRoom = useCallback(async (code: string, name: string) => {
+    const ack = await api("join", { code: code.toUpperCase(), name });
+    if (ack.ok && ack.code && ack.playerId) {
+      localStorage.setItem(playerKey(ack.code), ack.playerId);
+      setPlayerId(ack.playerId);
+    } else if (ack.error) setError(ack.error);
+    return ack;
+  }, []);
+
+  const withRoom = useCallback(
+    (action: string, extra: Record<string, unknown> = {}) => {
+      if (!codeRef.current || !playerId) return;
+      api(action, { code: codeRef.current, playerId, ...extra }).then((ack) => {
+        if (!ack.ok && ack.error) setError(ack.error);
+      });
+    },
+    [playerId]
   );
 
   const updateConfig = useCallback(
-    (config: Partial<GameConfig>) => getSocket().emit("update-config", config),
-    [getSocket]
+    (config: Partial<GameConfig>) => withRoom("config", { config }),
+    [withRoom]
   );
-  const startGame = useCallback(() => getSocket().emit("start-game"), [getSocket]);
-  const pickNumber = useCallback(
-    (value: number) => getSocket().emit("pick-number", value),
-    [getSocket]
-  );
-  const crossSquare = useCallback(
-    (index: number) => getSocket().emit("cross-square", index),
-    [getSocket]
-  );
-  const foundNumber = useCallback(() => getSocket().emit("found-number"), [getSocket]);
-  const playAgain = useCallback(() => getSocket().emit("play-again"), [getSocket]);
+  const startGame = useCallback(() => withRoom("start"), [withRoom]);
+  const pickNumber = useCallback((value: number) => withRoom("pick", { value }), [withRoom]);
+  const crossSquare = useCallback((index: number) => withRoom("cross", { index }), [withRoom]);
+  const foundNumber = useCallback(() => withRoom("found"), [withRoom]);
+  const playAgain = useCallback(() => withRoom("play-again"), [withRoom]);
   const leaveRoom = useCallback(() => {
-    getSocket().emit("leave-room");
+    withRoom("leave");
+    teardown();
+    codeRef.current = null;
     setState(null);
-  }, [getSocket]);
+  }, [withRoom, teardown]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -127,6 +157,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         setPlayerName,
         error,
         clearError,
+        connect,
         createRoom,
         joinRoom,
         updateConfig,
