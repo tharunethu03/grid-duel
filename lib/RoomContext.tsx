@@ -43,7 +43,7 @@ interface RoomContextValue {
   startGame: () => void;
   pickNumber: (value: number) => void;
   crossSquare: (index: number) => void;
-  foundNumber: () => void;
+  foundNumber: () => Promise<Ack | undefined>;
   playAgain: () => void;
   leaveRoom: () => void;
 }
@@ -121,10 +121,11 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const withRoom = useCallback(
-    (action: string, extra: Record<string, unknown> = {}) => {
-      if (!codeRef.current || !playerId) return;
-      api(action, { code: codeRef.current, playerId, ...extra }).then((ack) => {
+    (action: string, extra: Record<string, unknown> = {}): Promise<Ack | undefined> => {
+      if (!codeRef.current || !playerId) return Promise.resolve(undefined);
+      return api(action, { code: codeRef.current, playerId, ...extra }).then((ack) => {
         if (!ack.ok && ack.error) setError(ack.error);
+        return ack;
       });
     },
     [playerId]
@@ -136,7 +137,38 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   );
   const startGame = useCallback(() => withRoom("start"), [withRoom]);
   const pickNumber = useCallback((value: number) => withRoom("pick", { value }), [withRoom]);
-  const crossSquare = useCallback((index: number) => withRoom("cross", { index }), [withRoom]);
+
+  // Crossing a square marks it locally right away instead of waiting on the
+  // server round trip + Pusher broadcast, since that chain is slow enough
+  // per click to make rapid crossing feel laggy. The optimistic mark is
+  // rolled back if the server rejects the action.
+  const crossSquare = useCallback(
+    (index: number) => {
+      if (!playerId) return;
+      setState((prev) => {
+        if (!prev) return prev;
+        const grid = prev.grids[playerId];
+        if (!grid || grid[index]) return prev;
+        const nextGrid = [...grid];
+        nextGrid[index] = true;
+        return { ...prev, grids: { ...prev.grids, [playerId]: nextGrid } };
+      });
+      withRoom("cross", { index }).then((ack) => {
+        if (ack && !ack.ok) {
+          setState((prev) => {
+            if (!prev) return prev;
+            const grid = prev.grids[playerId];
+            if (!grid) return prev;
+            const nextGrid = [...grid];
+            nextGrid[index] = false;
+            return { ...prev, grids: { ...prev.grids, [playerId]: nextGrid } };
+          });
+        }
+      });
+    },
+    [withRoom, playerId]
+  );
+
   const foundNumber = useCallback(() => withRoom("found"), [withRoom]);
   const playAgain = useCallback(() => withRoom("play-again"), [withRoom]);
   const leaveRoom = useCallback(() => {

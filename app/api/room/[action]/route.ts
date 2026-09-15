@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { customAlphabet } from "nanoid";
 import { getRoom, saveRoom, deleteRoom } from "@/lib/roomStore";
 import { makeBoards, makeGrids, clampConfig, makeRoomCode } from "@/lib/gameLogic";
-import { COUNTDOWN_MS, DEFAULT_CONFIG, RoomState, Player } from "@/lib/types";
+import {
+  COUNTDOWN_MS,
+  COUNTDOWN_GRACE_MS,
+  DEFAULT_CONFIG,
+  RoomState,
+  Player,
+} from "@/lib/types";
 
 const genId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 12);
 
@@ -132,7 +138,7 @@ export async function POST(
       if (error || !room || !player) return bad(error || "Not found", 404);
       if (room.phase !== "active") return bad("Not active");
       if (room.runnerId !== player.id) return bad("Not your turn", 403);
-      if (!room.countdownUntil || Date.now() < room.countdownUntil)
+      if (!room.countdownUntil || Date.now() < room.countdownUntil - COUNTDOWN_GRACE_MS)
         return bad("Wait for countdown");
       const index = Number(body.index);
       const grid = room.grids[player.id];
@@ -152,7 +158,7 @@ export async function POST(
       if (error || !room || !player) return bad(error || "Not found", 404);
       if (room.phase !== "active") return bad("Not active");
       if (room.seekerId !== player.id) return bad("Not your turn", 403);
-      if (!room.countdownUntil || Date.now() < room.countdownUntil)
+      if (!room.countdownUntil || Date.now() < room.countdownUntil - COUNTDOWN_GRACE_MS)
         return bad("Wait for countdown");
 
       const oldRunner = room.runnerId;

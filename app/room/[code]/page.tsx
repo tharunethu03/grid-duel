@@ -34,6 +34,7 @@ export default function RoomPage() {
   const [nameInput, setNameInput] = useState(playerName);
   const [wrongValue, setWrongValue] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(true);
+  const [submittingFound, setSubmittingFound] = useState(false);
 
   useEffect(() => {
     connect(code);
@@ -42,6 +43,12 @@ export default function RoomPage() {
   useEffect(() => {
     setNameInput(playerName);
   }, [playerName]);
+
+  // Any fresh room state (including the phase swap after a correct guess)
+  // means our last "found" submission has been resolved one way or another.
+  useEffect(() => {
+    setSubmittingFound(false);
+  }, [state]);
 
   const isMember = useMemo(
     () => !!state && !!playerId && state.players.some((p) => p.id === playerId),
@@ -123,9 +130,28 @@ export default function RoomPage() {
     setTimeout(() => setWrongValue(null), 500);
   };
 
+  const handleTileClick = async (value: number) => {
+    if (value !== state.target) {
+      handleWrongClick(value);
+      return;
+    }
+    setSubmittingFound(true);
+    const ack = await foundNumber();
+    if (ack && !ack.ok) setSubmittingFound(false);
+  };
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 gap-6 w-full max-w-2xl mx-auto">
       {showCountdown && state.countdownUntil && <Countdown until={state.countdownUntil} />}
+
+      {error && (
+        <div
+          className="w-full text-center text-sm text-[var(--danger)] cursor-pointer"
+          onClick={clearError}
+        >
+          {error}
+        </div>
+      )}
 
       <div className="flex items-center justify-between w-full">
         <div>
@@ -249,11 +275,8 @@ export default function RoomPage() {
               <ScatterBoard
                 board={myBoard}
                 wrongValue={wrongValue}
-                disabled={!revealed}
-                onTileClick={(value) => {
-                  if (value === state.target) foundNumber();
-                  else handleWrongClick(value);
-                }}
+                disabled={!revealed || submittingFound}
+                onTileClick={handleTileClick}
               />
             </>
           )}

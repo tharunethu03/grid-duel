@@ -34,6 +34,10 @@ export const DEFAULT_CONFIG: GameConfig = {
 };
 
 export const COUNTDOWN_MS = 3000;
+// Tolerance for clock skew / network jitter between the client's local
+// countdown timer and the server's wall clock, so a click made right as the
+// countdown visually ends isn't rejected by the server as "too early".
+export const COUNTDOWN_GRACE_MS = 400;
 export const MIN_NUMBER_RANGE = 4;
 export const MAX_NUMBER_RANGE = 500;
 export const MIN_GRID_SIZE = 4;
