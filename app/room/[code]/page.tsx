@@ -7,6 +7,7 @@ import ScatterBoard from "@/components/ScatterBoard";
 import CrossGrid from "@/components/CrossGrid";
 import Countdown from "@/components/Countdown";
 import GameConfigForm from "@/components/GameConfigForm";
+import TeamAssign from "@/components/TeamAssign";
 
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
@@ -22,6 +23,8 @@ export default function RoomPage() {
     connect,
     joinRoom,
     updateConfig,
+    setTeam,
+    randomizeTeams,
     startGame,
     pickNumber,
     crossSquare,
@@ -35,6 +38,7 @@ export default function RoomPage() {
   const [wrongValue, setWrongValue] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(true);
   const [submittingFound, setSubmittingFound] = useState(false);
+  const [armedFinderId, setArmedFinderId] = useState<string | null>(null);
 
   useEffect(() => {
     connect(code);
@@ -116,14 +120,40 @@ export default function RoomPage() {
   }
 
   const me = state.players.find((p) => p.id === playerId);
-  const opponent = state.players.find((p) => p.id !== playerId);
   const isHost = !!me?.isHost;
-  const isRunner = state.runnerId === playerId;
-  const isSeeker = state.seekerId === playerId;
+  const mode = state.config.mode;
+  const isFinder = !!playerId && state.finderIds.includes(playerId);
+  const isCrosser = !!playerId && state.crosserIds.includes(playerId);
   const myGrid = playerId ? state.grids[playerId] : undefined;
   const myBoard = playerId ? state.boards[playerId] : undefined;
-  const opponentGrid = opponent ? state.grids[opponent.id] : undefined;
+  const myTarget = playerId ? state.targets[playerId] : undefined;
   const showCountdown = state.phase === "active" && !!state.countdownUntil && !revealed;
+
+  const nameOf = (id: string) => state.players.find((p) => p.id === id)?.name ?? "Someone";
+  const crosserNames = state.crosserIds.map(nameOf).join(", ");
+  const openFinderIds = state.finderIds.filter((id) => !(id in state.targets));
+  const crossedTotal = state.crosserIds.reduce(
+    (sum, id) => sum + (state.grids[id]?.filter(Boolean).length ?? 0),
+    0
+  );
+  const squaresTotal = state.crosserIds.reduce(
+    (sum, id) => sum + (state.grids[id]?.length ?? 0),
+    0
+  );
+
+  const teamACount = state.players.filter((p) => p.teamId === "A").length;
+  const teamBCount = state.players.filter((p) => p.teamId === "B").length;
+  let canStart = state.players.length >= 2;
+  let startLabel = "Start Game";
+  if (state.players.length < 2) {
+    startLabel = "Waiting for players…";
+  } else if (mode === "classic" && state.players.length !== 2) {
+    canStart = false;
+    startLabel = "Classic mode needs exactly 2 players";
+  } else if (mode === "teams" && (teamACount === 0 || teamBCount === 0)) {
+    canStart = false;
+    startLabel = "Everyone needs a team";
+  }
 
   const handleWrongClick = (value: number) => {
     setWrongValue(value);
@@ -131,7 +161,7 @@ export default function RoomPage() {
   };
 
   const handleTileClick = async (value: number) => {
-    if (value !== state.target) {
+    if (value !== myTarget) {
       handleWrongClick(value);
       return;
     }
@@ -139,6 +169,21 @@ export default function RoomPage() {
     const ack = await foundNumber();
     if (ack && !ack.ok) setSubmittingFound(false);
   };
+
+  const handleScatterPick = (value: number) => {
+    const forId = armedFinderId ?? (openFinderIds.length === 1 ? openFinderIds[0] : null);
+    if (!forId) return;
+    pickNumber(value, forId);
+    setArmedFinderId(null);
+  };
+
+  const winner = state.players.find((p) => p.id === state.winnerId);
+  const winnerLabel =
+    mode === "teams" && winner?.teamId
+      ? `Team ${winner.teamId} wins!`
+      : winner
+      ? `${winner.name} wins!`
+      : "";
 
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 gap-6 w-full max-w-2xl mx-auto">
@@ -191,7 +236,7 @@ export default function RoomPage() {
               ))}
               {state.players.length < 2 && (
                 <div className="px-4 py-3 rounded-xl border border-dashed border-[var(--border)] text-[var(--muted)] text-sm">
-                  Waiting for opponent to join with code{" "}
+                  Waiting for others to join with code{" "}
                   <span className="font-semibold">{code}</span>...
                 </div>
               )}
@@ -207,13 +252,23 @@ export default function RoomPage() {
             />
           </div>
 
+          {mode === "teams" && (
+            <TeamAssign
+              players={state.players}
+              myId={playerId}
+              isHost={isHost}
+              onSetTeam={setTeam}
+              onRandomize={randomizeTeams}
+            />
+          )}
+
           {isHost ? (
             <button
               className="btn btn-primary w-full py-3"
-              disabled={state.players.length !== 2}
+              disabled={!canStart}
               onClick={startGame}
             >
-              {state.players.length === 2 ? "Start Game" : "Waiting for opponent…"}
+              {startLabel}
             </button>
           ) : (
             <p className="text-center text-sm text-[var(--muted)]">
@@ -225,19 +280,39 @@ export default function RoomPage() {
 
       {state.phase === "picking" && (
         <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
-          {isRunner ? (
+          {isCrosser ? (
             <>
-              <h2 className="text-xl font-semibold">
-                Pick a number for {opponent?.name} to find
+              <h2 className="text-xl font-semibold text-center">
+                {openFinderIds.length > 0
+                  ? "Pick a number to hide"
+                  : "Waiting for the round to start…"}
               </h2>
-              {myBoard && (
-                <ScatterBoard board={myBoard} onTileClick={pickNumber} />
+              {openFinderIds.length > 1 && (
+                <div className="flex flex-wrap justify-center gap-2">
+                  {openFinderIds.map((id) => (
+                    <button
+                      key={id}
+                      onClick={() => setArmedFinderId(id)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                        armedFinderId === id
+                          ? "bg-[var(--accent)] text-white border-[var(--accent)]"
+                          : "border-[var(--border)] text-[var(--muted)]"
+                      }`}
+                    >
+                      For {nameOf(id)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {myBoard && openFinderIds.length > 0 && (
+                <ScatterBoard board={myBoard} onTileClick={handleScatterPick} />
               )}
             </>
           ) : (
             <div className="card p-10 text-center">
               <p className="text-lg font-medium">
-                {opponent?.name} is picking a number…
+                {crosserNames} {state.crosserIds.length > 1 ? "are" : "is"} picking a
+                number{isFinder ? " for you" : ""}…
               </p>
               <p className="text-sm text-[var(--muted)] mt-1">Get ready to search!</p>
             </div>
@@ -247,29 +322,31 @@ export default function RoomPage() {
 
       {state.phase === "active" && (
         <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
-          {isRunner && myGrid && (
+          {isCrosser && myGrid && (
             <>
-              <h2 className="text-xl font-semibold">
-                Cross the grid before {opponent?.name} finds the number!
+              <h2 className="text-xl font-semibold text-center">
+                Cross the grid before they find the number!
               </h2>
               <p className="text-sm text-[var(--muted)]">
                 {myGrid.filter(Boolean).length} / {myGrid.length} crossed
               </p>
+              {state.finderIds.length > 1 && (
+                <p className="text-sm text-[var(--muted)]">
+                  {state.foundIds.length} / {state.finderIds.length} found their number
+                </p>
+              )}
               <CrossGrid grid={myGrid} onSquareClick={crossSquare} disabled={!revealed} />
             </>
           )}
-          {isSeeker && myBoard && (
+          {isFinder && myBoard && (
             <>
               <div className="card px-6 py-4 text-center animate-pop-in">
                 <p className="text-sm text-[var(--muted)]">Find this number</p>
-                <p className="text-4xl font-bold text-[var(--accent)]">
-                  {state.target}
-                </p>
+                <p className="text-4xl font-bold text-[var(--accent)]">{myTarget}</p>
               </div>
-              {opponentGrid && (
+              {squaresTotal > 0 && (
                 <p className="text-sm text-[var(--muted)]">
-                  {opponent?.name}: {opponentGrid.filter(Boolean).length} /{" "}
-                  {opponentGrid.length} crossed
+                  {crosserNames}: {crossedTotal} / {squaresTotal} crossed
                 </p>
               )}
               <ScatterBoard
@@ -285,12 +362,12 @@ export default function RoomPage() {
 
       {state.phase === "gameover" && (
         <div className="card w-full p-10 text-center flex flex-col items-center gap-4 animate-fade-in">
-          <div className="text-5xl">{state.winnerId === playerId ? "🏆" : "🙈"}</div>
-          <h2 className="text-2xl font-bold">
-            {state.winnerId === playerId
-              ? "You win!"
-              : `${state.players.find((p) => p.id === state.winnerId)?.name} wins!`}
-          </h2>
+          <div className="text-5xl">
+            {state.winnerId === playerId || (mode === "teams" && winner?.teamId === me?.teamId)
+              ? "🏆"
+              : "🙈"}
+          </div>
+          <h2 className="text-2xl font-bold">{winnerLabel}</h2>
           {isHost ? (
             <button className="btn btn-primary px-8 py-3" onClick={playAgain}>
               Play Again

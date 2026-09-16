@@ -1,7 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { GameConfig } from "@/lib/types";
+import type { GameConfig, GameMode } from "@/lib/types";
+
+const MODES: { value: GameMode; label: string }[] = [
+  { value: "classic", label: "Classic" },
+  { value: "teams", label: "Teams" },
+  { value: "cycle", label: "Cycle" },
+];
+
+function ModeSelector({
+  value,
+  editable,
+  onChange,
+}: {
+  value: GameMode;
+  editable: boolean;
+  onChange: (mode: GameMode) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1.5 text-[var(--muted)]">
+        Mode
+      </label>
+      <div className="flex gap-1 p-1 rounded-xl bg-[var(--accent-soft)]">
+        {MODES.map((m) => (
+          <button
+            key={m.value}
+            type="button"
+            disabled={!editable}
+            onClick={() => onChange(m.value)}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed ${
+              value === m.value
+                ? "bg-[var(--accent)] text-white shadow-sm"
+                : "text-[var(--muted)]"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function NumberField({
   label,
@@ -57,6 +98,11 @@ export default function GameConfigForm({
 }) {
   return (
     <div className="flex flex-col gap-5">
+      <ModeSelector
+        value={config.mode}
+        editable={editable}
+        onChange={(mode) => onChange({ mode })}
+      />
       <NumberField
         label="Number range (1 – x)"
         value={config.numberRange}

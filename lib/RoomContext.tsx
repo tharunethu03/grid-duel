@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { Channel } from "pusher-js";
 import { getPusherClient } from "./pusherClient";
-import type { GameConfig, RoomState } from "./types";
+import type { GameConfig, RoomState, TeamId } from "./types";
 
 interface Ack {
   ok: boolean;
@@ -40,8 +40,10 @@ interface RoomContextValue {
   createRoom: (name: string) => Promise<Ack>;
   joinRoom: (code: string, name: string) => Promise<Ack>;
   updateConfig: (config: Partial<GameConfig>) => void;
-  startGame: () => void;
-  pickNumber: (value: number) => void;
+  setTeam: (teamId: TeamId | null, forId?: string) => void;
+  randomizeTeams: () => void;
+  startGame: () => Promise<Ack | undefined>;
+  pickNumber: (value: number, forId: string) => void;
   crossSquare: (index: number) => void;
   foundNumber: () => Promise<Ack | undefined>;
   playAgain: () => void;
@@ -135,8 +137,16 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     (config: Partial<GameConfig>) => withRoom("config", { config }),
     [withRoom]
   );
+  const setTeam = useCallback(
+    (teamId: TeamId | null, forId?: string) => withRoom("team", { teamId, forId }),
+    [withRoom]
+  );
+  const randomizeTeams = useCallback(() => withRoom("randomize-teams"), [withRoom]);
   const startGame = useCallback(() => withRoom("start"), [withRoom]);
-  const pickNumber = useCallback((value: number) => withRoom("pick", { value }), [withRoom]);
+  const pickNumber = useCallback(
+    (value: number, forId: string) => withRoom("pick", { value, forId }),
+    [withRoom]
+  );
 
   // Crossing a square marks it locally right away instead of waiting on the
   // server round trip + Pusher broadcast, since that chain is slow enough
@@ -193,6 +203,8 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         createRoom,
         joinRoom,
         updateConfig,
+        setTeam,
+        randomizeTeams,
         startGame,
         pickNumber,
         crossSquare,
