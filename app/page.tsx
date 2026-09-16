@@ -1,8 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRoom } from "@/lib/RoomContext";
+import Toast from "@/components/Toast";
+import pkg from "@/package.json";
+
+// Reading the URL's search params opts a route into client-side rendering up
+// to the nearest Suspense boundary, so this is isolated in its own component
+// rather than called directly in Home (which stays prerenderable).
+function RemovedNotice({ onNotice }: { onNotice: () => void }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (searchParams.get("notice") === "removed") {
+      onNotice();
+      router.replace("/");
+    }
+  }, [searchParams, router, onNotice]);
+
+  return null;
+}
 
 export default function Home() {
   const router = useRouter();
@@ -35,6 +54,11 @@ export default function Home() {
 
   return (
     <div className="dot-grid-panel flex flex-1 flex-col w-full">
+      <Suspense fallback={null}>
+        <RemovedNotice onNotice={() => setError("You were removed from the room")} />
+      </Suspense>
+      <Toast message={error || null} onDismiss={() => setError("")} />
+
       <div className="w-full px-5 sm:px-8 pt-14 pb-10 text-center">
         <p className="text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
           Welcome to
@@ -61,8 +85,6 @@ export default function Home() {
               onChange={(e) => setPlayerName(e.target.value)}
             />
           </div>
-
-          {error && <p className="text-sm text-[var(--danger)] -mt-2">{error}</p>}
 
           {mode === "none" ? (
             <div className="flex flex-col gap-3">
@@ -106,6 +128,8 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      <p className="pb-6 text-center text-[11px] text-[var(--muted)]">v{pkg.version}</p>
     </div>
   );
 }

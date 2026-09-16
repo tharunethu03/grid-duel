@@ -48,6 +48,9 @@ interface RoomContextValue {
   foundNumber: () => Promise<Ack | undefined>;
   playAgain: () => void;
   leaveRoom: () => void;
+  kickPlayer: (targetId: string) => void;
+  makeHost: (targetId: string) => void;
+  endGame: () => void;
 }
 
 const RoomContext = createContext<RoomContextValue | null>(null);
@@ -181,6 +184,15 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
 
   const foundNumber = useCallback(() => withRoom("found"), [withRoom]);
   const playAgain = useCallback(() => withRoom("play-again"), [withRoom]);
+  const kickPlayer = useCallback(
+    (targetId: string) => withRoom("kick", { targetId }),
+    [withRoom]
+  );
+  const makeHost = useCallback(
+    (targetId: string) => withRoom("make-host", { targetId }),
+    [withRoom]
+  );
+  const endGame = useCallback(() => withRoom("end-game"), [withRoom]);
   const leaveRoom = useCallback(() => {
     withRoom("leave");
     teardown();
@@ -211,6 +223,9 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         foundNumber,
         playAgain,
         leaveRoom,
+        kickPlayer,
+        makeHost,
+        endGame,
       }}
     >
       {children}

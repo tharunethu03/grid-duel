@@ -1,14 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useRoom } from "@/lib/RoomContext";
+import { isMuted, playSound, setMuted } from "@/lib/sounds";
 import ScatterBoard from "@/components/ScatterBoard";
 import CrossGrid from "@/components/CrossGrid";
 import Countdown from "@/components/Countdown";
 import GameConfigForm from "@/components/GameConfigForm";
 import TeamAssign from "@/components/TeamAssign";
 import Avatar from "@/components/Avatar";
+import Modal from "@/components/Modal";
+import Toast from "@/components/Toast";
+
+function SpeakerIcon({ muted, className }: { muted: boolean; className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className={className}>
+      <path d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217z" />
+      {!muted && (
+        <path
+          d="M13.5 7a4 4 0 010 6M15.5 4.5a7.5 7.5 0 010 11"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          fill="none"
+        />
+      )}
+      {muted && (
+        <path
+          d="M13.5 7.5l3.5 3.5M17 7.5l-3.5 3.5"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          fill="none"
+        />
+      )}
+    </svg>
+  );
+}
 
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
@@ -32,15 +61,23 @@ export default function RoomPage() {
     foundNumber,
     playAgain,
     leaveRoom,
+    kickPlayer,
+    makeHost,
+    endGame,
   } = useRoom();
 
   const [joining, setJoining] = useState(false);
   const [nameInput, setNameInput] = useState(playerName);
   const [wrongValue, setWrongValue] = useState<number | null>(null);
+  const [shuffleSeed, setShuffleSeed] = useState(0);
   const [revealed, setRevealed] = useState(true);
   const [submittingFound, setSubmittingFound] = useState(false);
   const [armedFinderId, setArmedFinderId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [managingId, setManagingId] = useState<string | null>(null);
+  const [muted, setMutedState] = useState(() => isMuted());
+  const [confirmAction, setConfirmAction] = useState<"leave" | "end-game" | null>(null);
+  const [waitingNotice, setWaitingNotice] = useState<string | null>(null);
 
   const handleCopyCode = async () => {
     try {
@@ -50,6 +87,12 @@ export default function RoomPage() {
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
   };
 
   useEffect(() => {
@@ -66,10 +109,106 @@ export default function RoomPage() {
     setSubmittingFound(false);
   }, [state]);
 
-  const isMember = useMemo(
+  const isFullMember = useMemo(
     () => !!state && !!playerId && state.players.some((p) => p.id === playerId),
     [state, playerId]
   );
+  const isWaitingMember = useMemo(
+    () => !!state && !!playerId && state.waiting.some((p) => p.id === playerId),
+    [state, playerId]
+  );
+
+  // Play a chime whenever someone new appears in or disappears from the room
+  // (players or the waiting list), skipping the very first state we ever
+  // receive so opening the room doesn't chime for everyone already there —
+  // and skipping ourselves, since we already know when we join or leave.
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const currentIds = new Set([
+      ...state.players.map((p) => p.id),
+      ...state.waiting.map((p) => p.id),
+    ]);
+    const previousIds = seenIdsRef.current;
+    if (previousIds) {
+      let joined = false;
+      let left = false;
+      for (const id of currentIds) {
+        if (!previousIds.has(id) && id !== playerId) joined = true;
+      }
+      for (const id of previousIds) {
+        if (!currentIds.has(id) && id !== playerId) left = true;
+      }
+      if (joined) playSound("join");
+      if (left) playSound("leave");
+    }
+    seenIdsRef.current = currentIds;
+  }, [state, playerId]);
+
+  // Play a sound the moment the host starts a round (lobby -> picking).
+  const prevPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    if (prevPhaseRef.current === "lobby" && state.phase === "picking") {
+      playSound("start");
+    }
+    prevPhaseRef.current = state.phase;
+  }, [state]);
+
+  // Surface a brief toast (not a persistent banner) whenever someone new
+  // lands on the waiting list.
+  const seenWaitingIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const currentIds = new Set(state.waiting.map((p) => p.id));
+    if (seenWaitingIdsRef.current) {
+      for (const p of state.waiting) {
+        if (!seenWaitingIdsRef.current.has(p.id)) {
+          setWaitingNotice(`${p.name} is waiting to join`);
+          break;
+        }
+      }
+    }
+    seenWaitingIdsRef.current = currentIds;
+  }, [state]);
+
+  // Play win/lose exactly once per game-over.
+  const gameoverHandledRef = useRef(false);
+  useEffect(() => {
+    if (!state || state.phase !== "gameover") {
+      gameoverHandledRef.current = false;
+      return;
+    }
+    if (gameoverHandledRef.current) return;
+    gameoverHandledRef.current = true;
+    const myPlayer = state.players.find((p) => p.id === playerId);
+    const winningPlayer = state.players.find((p) => p.id === state.winnerId);
+    const iWon =
+      state.winnerId === playerId ||
+      (state.config.mode === "teams" &&
+        !!winningPlayer?.teamId &&
+        winningPlayer.teamId === myPlayer?.teamId);
+    playSound(iWon ? "win" : "lose");
+  }, [state, playerId]);
+
+  // If we were a member (full or waiting) and now show up in neither list,
+  // the host removed us — bounce back home with a notice instead of showing
+  // a confusing "enter your name" screen.
+  const wasMemberRef = useRef(false);
+  useEffect(() => {
+    if (isFullMember || isWaitingMember) wasMemberRef.current = true;
+  }, [isFullMember, isWaitingMember]);
+  useEffect(() => {
+    if (!state || !playerId) return;
+    if (isFullMember || isWaitingMember) return;
+    if (!wasMemberRef.current) return;
+    try {
+      localStorage.removeItem(`gd-player-${code}`);
+    } catch {
+      // ignore
+    }
+    router.push("/?notice=removed");
+  }, [state, playerId, isFullMember, isWaitingMember, code, router]);
 
   useEffect(() => {
     if (state?.phase !== "active" || !state.countdownUntil) {
@@ -94,13 +233,22 @@ export default function RoomPage() {
     setJoining(false);
   };
 
-  if (!state || !isMember) {
+  if (!state || (!isFullMember && !isWaitingMember)) {
+    const gameLive = state?.phase === "picking" || state?.phase === "active";
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="card w-full max-w-sm p-6 flex flex-col gap-4">
           <div className="text-center">
-            <p className="text-sm text-[var(--muted)]">Joining room</p>
+            <p className="text-sm text-[var(--muted)]">
+              {gameLive ? "Game in progress" : "Joining room"}
+            </p>
             <p className="text-2xl font-bold tracking-[0.2em]">{code}</p>
+            {gameLive && (
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                You&apos;ll be added to the waiting list and join automatically once this
+                round ends.
+              </p>
+            )}
           </div>
           <input
             className="input w-full px-4 py-3 text-base"
@@ -109,13 +257,13 @@ export default function RoomPage() {
             maxLength={20}
             onChange={(e) => setNameInput(e.target.value)}
           />
-          {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
+          <Toast message={error} onDismiss={clearError} />
           <button
             className="btn btn-primary w-full py-3"
             disabled={joining}
             onClick={handleJoin}
           >
-            Join Room
+            {gameLive ? "Join Waiting List" : "Join Room"}
           </button>
           <button
             className="text-sm text-[var(--muted)]"
@@ -131,6 +279,53 @@ export default function RoomPage() {
     );
   }
 
+  if (isWaitingMember) {
+    return (
+      <div className="dot-grid-panel flex flex-1 items-center justify-center px-4 py-12">
+        <div className="card w-full max-w-sm p-6 flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-[var(--muted)]">Room</p>
+          <p className="text-2xl font-bold tracking-[0.2em]">{code}</p>
+          <div className="text-5xl mt-2">⏳</div>
+          <h2 className="text-lg font-semibold">Game in progress</h2>
+          <p className="text-sm text-[var(--muted)]">
+            You&apos;ll join automatically once this round ends.
+          </p>
+          <button
+            className="mt-2 text-sm text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+            onClick={() => setConfirmAction("leave")}
+          >
+            Leave
+          </button>
+        </div>
+
+        <Modal open={confirmAction === "leave"} onClose={() => setConfirmAction(null)}>
+          <div className="flex flex-col gap-3">
+            <p className="text-center font-semibold">Leave this room?</p>
+            <button
+              type="button"
+              className="btn w-full py-3 text-white"
+              style={{ background: "var(--danger)" }}
+              onClick={() => {
+                setConfirmAction(null);
+                leaveRoom();
+                router.push("/");
+              }}
+            >
+              Leave
+            </button>
+            <button
+              type="button"
+              className="text-sm text-[var(--muted)]"
+              onClick={() => setConfirmAction(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </Modal>
+      </div>
+    );
+  }
+
   const me = state.players.find((p) => p.id === playerId);
   const isHost = !!me?.isHost;
   const mode = state.config.mode;
@@ -141,7 +336,10 @@ export default function RoomPage() {
   const myTarget = playerId ? state.targets[playerId] : undefined;
   const showCountdown = state.phase === "active" && !!state.countdownUntil && !revealed;
 
-  const nameOf = (id: string) => state.players.find((p) => p.id === id)?.name ?? "Someone";
+  const nameOf = (id: string) =>
+    state.players.find((p) => p.id === id)?.name ??
+    state.waiting.find((p) => p.id === id)?.name ??
+    "Someone";
   const crosserNames = state.crosserIds.map(nameOf).join(", ");
   const openFinderIds = state.finderIds.filter((id) => !(id in state.targets));
   const crossedTotal = state.crosserIds.reduce(
@@ -169,6 +367,8 @@ export default function RoomPage() {
 
   const handleWrongClick = (value: number) => {
     setWrongValue(value);
+    setShuffleSeed((s) => s + 1);
+    playSound("wrong");
     setTimeout(() => setWrongValue(null), 500);
   };
 
@@ -177,14 +377,21 @@ export default function RoomPage() {
       handleWrongClick(value);
       return;
     }
+    playSound("correct");
     setSubmittingFound(true);
     const ack = await foundNumber();
     if (ack && !ack.ok) setSubmittingFound(false);
   };
 
+  const handleCrossSquare = (index: number) => {
+    if (myGrid && !myGrid[index]) playSound("cross");
+    crossSquare(index);
+  };
+
   const handleScatterPick = (value: number) => {
     const forId = armedFinderId ?? (openFinderIds.length === 1 ? openFinderIds[0] : null);
     if (!forId) return;
+    playSound("pick");
     pickNumber(value, forId);
     setArmedFinderId(null);
   };
@@ -200,6 +407,7 @@ export default function RoomPage() {
   return (
     <div className="dot-grid-panel flex flex-1 flex-col w-full">
       {showCountdown && state.countdownUntil && <Countdown until={state.countdownUntil} />}
+      <Toast message={error} onDismiss={clearError} />
 
       <div className="w-full px-5 sm:px-8 pt-8 pb-6 flex items-start justify-between">
         <div>
@@ -220,28 +428,43 @@ export default function RoomPage() {
             )}
           </button>
         </div>
-        <button
-          className="mt-1 text-base font-medium text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
-          onClick={() => {
-            leaveRoom();
-            router.push("/");
-          }}
-        >
-          Leave
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            aria-label={muted ? "Unmute sounds" : "Mute sounds"}
+            title={muted ? "Unmute sounds" : "Mute sounds"}
+            onClick={toggleMute}
+            className="mt-1 text-[var(--muted)] hover:text-white transition-colors"
+          >
+            <SpeakerIcon muted={muted} className="h-6 w-6" />
+          </button>
+          {isHost && (state.phase === "picking" || state.phase === "active") && (
+            <button
+              type="button"
+              className="mt-1 text-base font-medium text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+              onClick={() => setConfirmAction("end-game")}
+            >
+              End Game
+            </button>
+          )}
+          <button
+            type="button"
+            className="mt-1 text-base font-medium text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+            onClick={() => setConfirmAction("leave")}
+          >
+            Leave
+          </button>
+        </div>
       </div>
+
+      <Toast
+        message={!error ? waitingNotice : null}
+        onDismiss={() => setWaitingNotice(null)}
+        tone="info"
+      />
 
       <div className="w-full px-4 sm:px-6 pb-10">
         <div className="flex flex-col items-center gap-6 w-full max-w-2xl mx-auto">
-          {error && (
-            <div
-              className="w-full text-center text-sm text-[var(--danger)] cursor-pointer"
-              onClick={clearError}
-            >
-              {error}
-            </div>
-          )}
-
           {state.phase === "lobby" && (
             <div className="w-full flex flex-col gap-8 animate-fade-in">
               <div>
@@ -256,6 +479,9 @@ export default function RoomPage() {
                       name={p.name}
                       isHost={p.isHost}
                       isYou={p.id === playerId}
+                      onClick={
+                        isHost && p.id !== playerId ? () => setManagingId(p.id) : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -357,7 +583,7 @@ export default function RoomPage() {
                       {state.foundIds.length} / {state.finderIds.length} found their number
                     </p>
                   )}
-                  <CrossGrid grid={myGrid} onSquareClick={crossSquare} disabled={!revealed} />
+                  <CrossGrid grid={myGrid} onSquareClick={handleCrossSquare} disabled={!revealed} />
                 </>
               )}
               {isFinder && myBoard && (
@@ -374,6 +600,7 @@ export default function RoomPage() {
                   <ScatterBoard
                     board={myBoard}
                     wrongValue={wrongValue}
+                    shuffleSeed={shuffleSeed}
                     disabled={!revealed || submittingFound}
                     onTileClick={handleTileClick}
                   />
@@ -396,13 +623,102 @@ export default function RoomPage() {
                 </button>
               ) : (
                 <p className="text-sm text-[var(--muted)]">
-                  Waiting for host to start a new game…
+                  Waiting for host to replay the game…
                 </p>
               )}
             </div>
           )}
         </div>
       </div>
+
+      <Modal open={!!managingId} onClose={() => setManagingId(null)}>
+        {managingId && (
+          <div className="flex flex-col gap-3">
+            <p className="text-center font-semibold">{nameOf(managingId)}</p>
+            <button
+              type="button"
+              className="btn btn-secondary w-full py-3"
+              onClick={() => {
+                makeHost(managingId);
+                setManagingId(null);
+              }}
+            >
+              Make host
+            </button>
+            <button
+              type="button"
+              className="btn w-full py-3 text-white"
+              style={{ background: "var(--danger)" }}
+              onClick={() => {
+                kickPlayer(managingId);
+                setManagingId(null);
+              }}
+            >
+              Remove from room
+            </button>
+            <button
+              type="button"
+              className="text-sm text-[var(--muted)]"
+              onClick={() => setManagingId(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={confirmAction !== null} onClose={() => setConfirmAction(null)}>
+        {confirmAction === "leave" && (
+          <div className="flex flex-col gap-3">
+            <p className="text-center font-semibold">Leave this room?</p>
+            <button
+              type="button"
+              className="btn w-full py-3 text-white"
+              style={{ background: "var(--danger)" }}
+              onClick={() => {
+                setConfirmAction(null);
+                leaveRoom();
+                router.push("/");
+              }}
+            >
+              Leave
+            </button>
+            <button
+              type="button"
+              className="text-sm text-[var(--muted)]"
+              onClick={() => setConfirmAction(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+        {confirmAction === "end-game" && (
+          <div className="flex flex-col gap-3">
+            <p className="text-center font-semibold">End the game?</p>
+            <p className="text-center text-sm text-[var(--muted)]">
+              Everyone will be sent back to the lobby.
+            </p>
+            <button
+              type="button"
+              className="btn w-full py-3 text-white"
+              style={{ background: "var(--danger)" }}
+              onClick={() => {
+                setConfirmAction(null);
+                endGame();
+              }}
+            >
+              End Game
+            </button>
+            <button
+              type="button"
+              className="text-sm text-[var(--muted)]"
+              onClick={() => setConfirmAction(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

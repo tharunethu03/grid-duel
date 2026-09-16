@@ -28,15 +28,33 @@ export default function Avatar({
   isHost,
   isYou,
   size = 72,
+  onClick,
 }: {
   id: string;
   name: string;
   isHost?: boolean;
   isYou?: boolean;
   size?: number;
+  onClick?: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2" style={{ width: Math.max(size + 16, 92) }}>
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={`flex flex-col items-center gap-2 ${onClick ? "cursor-pointer active:scale-95 transition-transform" : ""}`}
+      style={{ width: Math.max(size + 16, 92) }}
+    >
       <div className="relative">
         {isHost && (
           <span

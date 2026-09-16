@@ -15,6 +15,7 @@ import {
   COUNTDOWN_GRACE_MS,
   DEFAULT_CONFIG,
   MAX_PLAYERS,
+  ROOM_LIFETIME_MS,
   RoomState,
   Player,
   TeamId,
@@ -48,6 +49,12 @@ function resetRound(room: RoomState) {
   room.countdownUntil = null;
 }
 
+function admitWaitlist(room: RoomState) {
+  if (room.waiting.length === 0) return;
+  room.players.push(...room.waiting);
+  room.waiting = [];
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ action: string }> }
@@ -77,6 +84,7 @@ export async function POST(
       const room: RoomState = {
         code,
         players: [{ id: playerId, name, isHost: true, teamId: null }],
+        waiting: [],
         config: { ...DEFAULT_CONFIG },
         phase: "lobby",
         finderIds: [],
@@ -88,6 +96,7 @@ export async function POST(
         boards: {},
         grids: {},
         winnerId: null,
+        expiresAt: Date.now() + ROOM_LIFETIME_MS,
         updatedAt: Date.now(),
       };
       await saveRoom(room);
@@ -99,12 +108,18 @@ export async function POST(
       const name = String(body.name || "Player").slice(0, 20);
       const room = await getRoom(code);
       if (!room) return bad("Room not found", 404);
-      if (room.phase !== "lobby") return bad("Game already started");
-      if (room.players.length >= MAX_PLAYERS) return bad("Room is full");
+      if (room.players.length + room.waiting.length >= MAX_PLAYERS) {
+        return bad("Room is full");
+      }
       const playerId = genId();
-      room.players.push({ id: playerId, name, isHost: false, teamId: null });
+      const player: Player = { id: playerId, name, isHost: false, teamId: null };
+      // A round in progress can't take new players mid-round; queue them
+      // instead and admit them once the round ends (see admitWaitlist).
+      const roundLive = room.phase === "picking" || room.phase === "active";
+      if (roundLive) room.waiting.push(player);
+      else room.players.push(player);
       await saveRoom(room);
-      return NextResponse.json({ ok: true, code, playerId });
+      return NextResponse.json({ ok: true, code, playerId, waiting: roundLive });
     }
 
     case "config": {
@@ -212,6 +227,7 @@ export async function POST(
       if (grid.every(Boolean)) {
         room.phase = "gameover";
         room.winnerId = player.id;
+        admitWaitlist(room);
       }
       await saveRoom(room);
       return NextResponse.json({ ok: true });
@@ -261,13 +277,76 @@ export async function POST(
       const playerId = String(body.playerId || "");
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ ok: true });
+      const wasPlayer = room.players.some((p) => p.id === playerId);
       room.players = room.players.filter((p) => p.id !== playerId);
-      if (room.players.length === 0) {
+      room.waiting = room.waiting.filter((p) => p.id !== playerId);
+      if (room.players.length === 0 && room.waiting.length === 0) {
         await deleteRoom(code);
         return NextResponse.json({ ok: true });
       }
-      if (!room.players.some((p) => p.isHost)) room.players[0].isHost = true;
+      if (wasPlayer) {
+        if (room.players.length === 0) {
+          admitWaitlist(room);
+        }
+        if (!room.players.some((p) => p.isHost) && room.players.length > 0) {
+          room.players[0].isHost = true;
+        }
+        resetRound(room);
+      }
+      await saveRoom(room);
+      return NextResponse.json({ ok: true });
+    }
+
+    case "kick": {
+      const { room, player, error } = await loadAndAuthorize(body);
+      if (error || !room || !player) return bad(error || "Not found", 404);
+      if (!player.isHost) return bad("Only host can remove players", 403);
+      const targetId = String(body.targetId || "");
+      if (targetId === player.id) return bad("Use leave to remove yourself");
+      const wasPlayer = room.players.some((p) => p.id === targetId);
+      const wasWaiting = room.waiting.some((p) => p.id === targetId);
+      if (!wasPlayer && !wasWaiting) return bad("Player not found", 404);
+      room.players = room.players.filter((p) => p.id !== targetId);
+      room.waiting = room.waiting.filter((p) => p.id !== targetId);
+      if (room.players.length === 0 && room.waiting.length === 0) {
+        await deleteRoom(room.code);
+        return NextResponse.json({ ok: true });
+      }
+      if (wasPlayer) {
+        if (room.players.length === 0) {
+          admitWaitlist(room);
+        }
+        if (!room.players.some((p) => p.isHost) && room.players.length > 0) {
+          room.players[0].isHost = true;
+        }
+        resetRound(room);
+      }
+      await saveRoom(room);
+      return NextResponse.json({ ok: true });
+    }
+
+    case "end-game": {
+      const { room, player, error } = await loadAndAuthorize(body);
+      if (error || !room || !player) return bad(error || "Not found", 404);
+      if (!player.isHost) return bad("Only host can end the game", 403);
+      if (room.phase === "lobby") return bad("Game not in progress");
+      admitWaitlist(room);
       resetRound(room);
+      room.winnerId = null;
+      await saveRoom(room);
+      return NextResponse.json({ ok: true });
+    }
+
+    case "make-host": {
+      const { room, player, error } = await loadAndAuthorize(body);
+      if (error || !room || !player) return bad(error || "Not found", 404);
+      if (!player.isHost) return bad("Only host can transfer host", 403);
+      const targetId = String(body.targetId || "");
+      if (targetId === player.id) return bad("Already host");
+      const target = room.players.find((p) => p.id === targetId);
+      if (!target) return bad("Player not found", 404);
+      player.isHost = false;
+      target.isHost = true;
       await saveRoom(room);
       return NextResponse.json({ ok: true });
     }

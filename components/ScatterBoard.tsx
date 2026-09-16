@@ -26,9 +26,9 @@ function hashString(str: string) {
   return h;
 }
 
-function layout(board: number[], width: number, height: number) {
+function layout(board: number[], width: number, height: number, shuffleSeed: number) {
   const n = Math.max(1, board.length);
-  const rand = seededRandom(hashString(board.join(",")) || 1);
+  const rand = seededRandom(hashString(board.join(",") + "|" + shuffleSeed) || 1);
 
   const padX = width * 0.05;
   const padY = height * 0.05;
@@ -83,11 +83,13 @@ export default function ScatterBoard({
   onTileClick,
   disabled,
   wrongValue,
+  shuffleSeed = 0,
 }: {
   board: number[];
   onTileClick?: (value: number) => void;
   disabled?: boolean;
   wrongValue?: number | null;
+  shuffleSeed?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -105,8 +107,8 @@ export default function ScatterBoard({
   }, []);
 
   const { spots, tileSize, fontSize } = useMemo(
-    () => layout(board, width || 320, height),
-    [boardKey, width, height]
+    () => layout(board, width || 320, height, shuffleSeed),
+    [boardKey, width, height, shuffleSeed]
   );
 
   return (
@@ -130,7 +132,7 @@ export default function ScatterBoard({
               transform: `translate(-50%, -50%) rotate(${spot.rotate}deg)`,
             }}
             className={`absolute flex items-center justify-center font-semibold text-[var(--foreground)]
-              transition-transform hover:scale-125 hover:z-10 hover:text-[var(--accent)] active:scale-90 disabled:hover:scale-100
+              transition-[left,top,transform] duration-300 ease-out hover:scale-125 hover:z-10 hover:text-[var(--accent)] active:scale-90 disabled:hover:scale-100
               ${wrongValue === spot.value ? "animate-shake text-[var(--danger)]" : ""}`}
           >
             {spot.value}

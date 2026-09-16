@@ -19,6 +19,7 @@ export interface Player {
 export interface RoomState {
   code: string;
   players: Player[];
+  waiting: Player[]; // joined mid-round; admitted into players once the round ends
   config: GameConfig;
   phase: Phase;
   finderIds: string[]; // players searching for their target this round
@@ -30,6 +31,7 @@ export interface RoomState {
   boards: Record<string, number[]>; // playerId -> scattered numbers, a permutation of 1..numberRange
   grids: Record<string, boolean[]>; // playerId -> crossed squares
   winnerId: string | null;
+  expiresAt: number; // ms epoch; room is deleted here unless a round is live (see roomStore.saveRoom)
   updatedAt: number;
 }
 
@@ -40,6 +42,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   mode: "classic",
 };
 
+export const ROOM_LIFETIME_MS = 90 * 60 * 1000; // 1.5 hours
 export const COUNTDOWN_MS = 3000;
 // Tolerance for clock skew / network jitter between the client's local
 // countdown timer and the server's wall clock, so a click made right as the
