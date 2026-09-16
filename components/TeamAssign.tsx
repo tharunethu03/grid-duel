@@ -4,6 +4,26 @@ import type { Player, TeamId } from "@/lib/types";
 
 const TEAMS: TeamId[] = ["A", "B"];
 
+function ShuffleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <polyline points="16 3 21 3 21 8" />
+      <line x1="4" y1="20" x2="21" y2="3" />
+      <polyline points="21 16 21 21 16 21" />
+      <line x1="15" y1="15" x2="21" y2="21" />
+      <line x1="4" y1="4" x2="9" y2="9" />
+    </svg>
+  );
+}
+
 export default function TeamAssign({
   players,
   myId,
@@ -24,10 +44,12 @@ export default function TeamAssign({
         {isHost && (
           <button
             type="button"
-            className="text-xs font-semibold text-[var(--accent)]"
+            title="Randomize teams"
+            aria-label="Randomize teams"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] transition-transform active:scale-90 hover:opacity-80"
             onClick={onRandomize}
           >
-            Randomize
+            <ShuffleIcon className="h-4 w-4" />
           </button>
         )}
       </div>

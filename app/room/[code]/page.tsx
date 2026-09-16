@@ -8,6 +8,7 @@ import CrossGrid from "@/components/CrossGrid";
 import Countdown from "@/components/Countdown";
 import GameConfigForm from "@/components/GameConfigForm";
 import TeamAssign from "@/components/TeamAssign";
+import Avatar from "@/components/Avatar";
 
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
@@ -39,6 +40,17 @@ export default function RoomPage() {
   const [revealed, setRevealed] = useState(true);
   const [submittingFound, setSubmittingFound] = useState(false);
   const [armedFinderId, setArmedFinderId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      return;
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   useEffect(() => {
     connect(code);
@@ -186,25 +198,30 @@ export default function RoomPage() {
       : "";
 
   return (
-    <div className="flex flex-1 flex-col items-center px-4 py-8 gap-6 w-full max-w-2xl mx-auto">
+    <div className="dot-grid-panel flex flex-1 flex-col w-full">
       {showCountdown && state.countdownUntil && <Countdown until={state.countdownUntil} />}
 
-      {error && (
-        <div
-          className="w-full text-center text-sm text-[var(--danger)] cursor-pointer"
-          onClick={clearError}
-        >
-          {error}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between w-full">
+      <div className="w-full px-5 sm:px-8 pt-8 pb-6 flex items-start justify-between">
         <div>
-          <p className="text-xs text-[var(--muted)]">Room</p>
-          <p className="font-mono font-semibold tracking-widest">{code}</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
+            Room Code
+          </p>
+          <button
+            type="button"
+            onClick={handleCopyCode}
+            title="Click to copy"
+            className="relative mt-1 block font-mono text-4xl sm:text-5xl font-extrabold tracking-[0.12em] text-white hover:text-white/80 active:scale-95 transition-all cursor-pointer"
+          >
+            {code}
+            {copied && (
+              <span className="absolute left-1/2 -bottom-7 -translate-x-1/2 text-xs font-semibold text-white bg-[var(--accent)] px-3 py-1 rounded-full whitespace-nowrap animate-toast-in shadow-md">
+                Copied!
+              </span>
+            )}
+          </button>
         </div>
         <button
-          className="text-sm text-[var(--muted)] hover:text-[var(--danger)]"
+          className="mt-1 text-base font-medium text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
           onClick={() => {
             leaveRoom();
             router.push("/");
@@ -214,171 +231,178 @@ export default function RoomPage() {
         </button>
       </div>
 
-      {state.phase === "lobby" && (
-        <div className="card w-full p-6 flex flex-col gap-6 animate-fade-in">
-          <div>
-            <h2 className="text-xl font-semibold mb-3">Players</h2>
-            <div className="flex flex-col gap-2">
-              {state.players.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between px-4 py-3 rounded-xl bg-[var(--accent-soft)]"
-                >
-                  <span className="font-medium">
-                    {p.name} {p.id === playerId && "(you)"}
-                  </span>
-                  {p.isHost && (
-                    <span className="text-xs font-semibold text-[var(--accent)]">
-                      HOST
-                    </span>
-                  )}
-                </div>
-              ))}
-              {state.players.length < 2 && (
-                <div className="px-4 py-3 rounded-xl border border-dashed border-[var(--border)] text-[var(--muted)] text-sm">
-                  Waiting for others to join with code{" "}
-                  <span className="font-semibold">{code}</span>...
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <h2 className="text-xl font-semibold mb-3">Game settings</h2>
-            <GameConfigForm
-              config={state.config}
-              editable={isHost}
-              onChange={updateConfig}
-            />
-          </div>
-
-          {mode === "teams" && (
-            <TeamAssign
-              players={state.players}
-              myId={playerId}
-              isHost={isHost}
-              onSetTeam={setTeam}
-              onRandomize={randomizeTeams}
-            />
-          )}
-
-          {isHost ? (
-            <button
-              className="btn btn-primary w-full py-3"
-              disabled={!canStart}
-              onClick={startGame}
+      <div className="w-full px-4 sm:px-6 pb-10">
+        <div className="flex flex-col items-center gap-6 w-full max-w-2xl mx-auto">
+          {error && (
+            <div
+              className="w-full text-center text-sm text-[var(--danger)] cursor-pointer"
+              onClick={clearError}
             >
-              {startLabel}
-            </button>
-          ) : (
-            <p className="text-center text-sm text-[var(--muted)]">
-              Waiting for host to start the game…
-            </p>
+              {error}
+            </div>
           )}
-        </div>
-      )}
 
-      {state.phase === "picking" && (
-        <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
-          {isCrosser ? (
-            <>
-              <h2 className="text-xl font-semibold text-center">
-                {openFinderIds.length > 0
-                  ? "Pick a number to hide"
-                  : "Waiting for the round to start…"}
-              </h2>
-              {openFinderIds.length > 1 && (
-                <div className="flex flex-wrap justify-center gap-2">
-                  {openFinderIds.map((id) => (
-                    <button
-                      key={id}
-                      onClick={() => setArmedFinderId(id)}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        armedFinderId === id
-                          ? "bg-[var(--accent)] text-white border-[var(--accent)]"
-                          : "border-[var(--border)] text-[var(--muted)]"
-                      }`}
-                    >
-                      For {nameOf(id)}
-                    </button>
+          {state.phase === "lobby" && (
+            <div className="w-full flex flex-col gap-8 animate-fade-in">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-widest mb-4 text-[var(--muted)]">
+                  Players
+                </h2>
+                <div className="flex flex-wrap gap-x-6 gap-y-4">
+                  {state.players.map((p) => (
+                    <Avatar
+                      key={p.id}
+                      id={p.id}
+                      name={p.name}
+                      isHost={p.isHost}
+                      isYou={p.id === playerId}
+                    />
                   ))}
                 </div>
+                {state.players.length < 2 && (
+                  <div className="mt-4 px-4 py-3 rounded-xl border border-dashed border-[var(--border)] text-[var(--muted)] text-sm">
+                    Waiting for others to join with code{" "}
+                    <span className="font-semibold">{code}</span>...
+                  </div>
+                )}
+              </div>
+
+              <GameConfigForm
+                config={state.config}
+                editable={isHost}
+                playerCount={state.players.length}
+                onChange={updateConfig}
+              />
+
+              {mode === "teams" && (
+                <TeamAssign
+                  players={state.players}
+                  myId={playerId}
+                  isHost={isHost}
+                  onSetTeam={setTeam}
+                  onRandomize={randomizeTeams}
+                />
               )}
-              {myBoard && openFinderIds.length > 0 && (
-                <ScatterBoard board={myBoard} onTileClick={handleScatterPick} />
+
+              {isHost ? (
+                <button
+                  className="btn btn-primary w-full py-4 text-lg"
+                  disabled={!canStart}
+                  onClick={startGame}
+                >
+                  {startLabel}
+                </button>
+              ) : (
+                <p className="text-center text-sm text-[var(--muted)]">
+                  Waiting for host to start the game…
+                </p>
               )}
-            </>
-          ) : (
-            <div className="card p-10 text-center">
-              <p className="text-lg font-medium">
-                {crosserNames} {state.crosserIds.length > 1 ? "are" : "is"} picking a
-                number{isFinder ? " for you" : ""}…
-              </p>
-              <p className="text-sm text-[var(--muted)] mt-1">Get ready to search!</p>
+            </div>
+          )}
+
+          {state.phase === "picking" && (
+            <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
+              {isCrosser ? (
+                <>
+                  <h2 className="text-xl font-semibold text-center">
+                    {openFinderIds.length > 0
+                      ? "Pick a number to hide"
+                      : "Waiting for the round to start…"}
+                  </h2>
+                  {openFinderIds.length > 1 && (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {openFinderIds.map((id) => (
+                        <button
+                          key={id}
+                          onClick={() => setArmedFinderId(id)}
+                          className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                            armedFinderId === id
+                              ? "bg-[var(--accent)] text-white border-[var(--accent)]"
+                              : "border-[var(--border)] text-[var(--muted)]"
+                          }`}
+                        >
+                          For {nameOf(id)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {myBoard && openFinderIds.length > 0 && (
+                    <ScatterBoard board={myBoard} onTileClick={handleScatterPick} />
+                  )}
+                </>
+              ) : (
+                <div className="card p-10 text-center">
+                  <p className="text-lg font-medium">
+                    {crosserNames} {state.crosserIds.length > 1 ? "are" : "is"} picking a
+                    number{isFinder ? " for you" : ""}…
+                  </p>
+                  <p className="text-sm text-[var(--muted)] mt-1">Get ready to search!</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {state.phase === "active" && (
+            <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
+              {isCrosser && myGrid && (
+                <>
+                  <h2 className="text-xl font-semibold text-center">
+                    Cross the grid before they find the number!
+                  </h2>
+                  <p className="text-sm text-[var(--muted)]">
+                    {myGrid.filter(Boolean).length} / {myGrid.length} crossed
+                  </p>
+                  {state.finderIds.length > 1 && (
+                    <p className="text-sm text-[var(--muted)]">
+                      {state.foundIds.length} / {state.finderIds.length} found their number
+                    </p>
+                  )}
+                  <CrossGrid grid={myGrid} onSquareClick={crossSquare} disabled={!revealed} />
+                </>
+              )}
+              {isFinder && myBoard && (
+                <>
+                  <div className="card px-6 py-4 text-center animate-pop-in">
+                    <p className="text-sm text-[var(--muted)]">Find this number</p>
+                    <p className="text-4xl font-bold text-[var(--accent)]">{myTarget}</p>
+                  </div>
+                  {squaresTotal > 0 && (
+                    <p className="text-sm text-[var(--muted)]">
+                      {crosserNames}: {crossedTotal} / {squaresTotal} crossed
+                    </p>
+                  )}
+                  <ScatterBoard
+                    board={myBoard}
+                    wrongValue={wrongValue}
+                    disabled={!revealed || submittingFound}
+                    onTileClick={handleTileClick}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {state.phase === "gameover" && (
+            <div className="card w-full p-10 text-center flex flex-col items-center gap-4 animate-fade-in">
+              <div className="text-5xl">
+                {state.winnerId === playerId || (mode === "teams" && winner?.teamId === me?.teamId)
+                  ? "🏆"
+                  : "🙈"}
+              </div>
+              <h2 className="text-2xl font-bold">{winnerLabel}</h2>
+              {isHost ? (
+                <button className="btn btn-primary px-8 py-3" onClick={playAgain}>
+                  Play Again
+                </button>
+              ) : (
+                <p className="text-sm text-[var(--muted)]">
+                  Waiting for host to start a new game…
+                </p>
+              )}
             </div>
           )}
         </div>
-      )}
-
-      {state.phase === "active" && (
-        <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
-          {isCrosser && myGrid && (
-            <>
-              <h2 className="text-xl font-semibold text-center">
-                Cross the grid before they find the number!
-              </h2>
-              <p className="text-sm text-[var(--muted)]">
-                {myGrid.filter(Boolean).length} / {myGrid.length} crossed
-              </p>
-              {state.finderIds.length > 1 && (
-                <p className="text-sm text-[var(--muted)]">
-                  {state.foundIds.length} / {state.finderIds.length} found their number
-                </p>
-              )}
-              <CrossGrid grid={myGrid} onSquareClick={crossSquare} disabled={!revealed} />
-            </>
-          )}
-          {isFinder && myBoard && (
-            <>
-              <div className="card px-6 py-4 text-center animate-pop-in">
-                <p className="text-sm text-[var(--muted)]">Find this number</p>
-                <p className="text-4xl font-bold text-[var(--accent)]">{myTarget}</p>
-              </div>
-              {squaresTotal > 0 && (
-                <p className="text-sm text-[var(--muted)]">
-                  {crosserNames}: {crossedTotal} / {squaresTotal} crossed
-                </p>
-              )}
-              <ScatterBoard
-                board={myBoard}
-                wrongValue={wrongValue}
-                disabled={!revealed || submittingFound}
-                onTileClick={handleTileClick}
-              />
-            </>
-          )}
-        </div>
-      )}
-
-      {state.phase === "gameover" && (
-        <div className="card w-full p-10 text-center flex flex-col items-center gap-4 animate-fade-in">
-          <div className="text-5xl">
-            {state.winnerId === playerId || (mode === "teams" && winner?.teamId === me?.teamId)
-              ? "🏆"
-              : "🙈"}
-          </div>
-          <h2 className="text-2xl font-bold">{winnerLabel}</h2>
-          {isHost ? (
-            <button className="btn btn-primary px-8 py-3" onClick={playAgain}>
-              Play Again
-            </button>
-          ) : (
-            <p className="text-sm text-[var(--muted)]">
-              Waiting for host to start a new game…
-            </p>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

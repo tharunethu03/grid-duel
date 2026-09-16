@@ -34,21 +34,23 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--accent)] text-2xl font-bold text-white shadow-lg">
-            #
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight">Grid Duel</h1>
-          <p className="mt-1 text-[var(--muted)]">
-            Find the number. Cross the grid. Beat your friend.
-          </p>
-        </div>
+    <div className="dot-grid-panel flex flex-1 flex-col w-full">
+      <div className="w-full px-5 sm:px-8 pt-14 pb-10 text-center">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
+          Welcome to
+        </p>
+        <h1 className="mt-1 font-mono text-4xl sm:text-5xl font-extrabold tracking-[0.06em] text-white">
+          Grid Duel
+        </h1>
+        <p className="mt-3 text-[var(--muted)]">
+          Find the number. Cross the grid. Beat your friends.
+        </p>
+      </div>
 
-        <div className="card p-6 flex flex-col gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1.5 text-[var(--muted)]">
+      <div className="w-full px-4 sm:px-6 pb-10">
+        <div className="w-full max-w-sm mx-auto flex flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <label className="block text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
               Your name
             </label>
             <input
@@ -60,21 +62,19 @@ export default function Home() {
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-[var(--danger)] -mt-1">{error}</p>
-          )}
+          {error && <p className="text-sm text-[var(--danger)] -mt-2">{error}</p>}
 
           {mode === "none" ? (
             <div className="flex flex-col gap-3">
               <button
-                className="btn btn-primary w-full py-3 text-base"
+                className="btn btn-primary w-full py-4 text-base"
                 disabled={loading}
                 onClick={handleCreate}
               >
                 Create Room
               </button>
               <button
-                className="btn btn-secondary w-full py-3 text-base"
+                className="btn btn-secondary w-full py-4 text-base"
                 onClick={() => setMode("join")}
               >
                 Join Room
@@ -90,7 +90,7 @@ export default function Home() {
                 onChange={(e) => setJoinCode(e.target.value)}
               />
               <button
-                className="btn btn-primary w-full py-3 text-base"
+                className="btn btn-primary w-full py-4 text-base"
                 disabled={loading}
                 onClick={handleJoin}
               >
