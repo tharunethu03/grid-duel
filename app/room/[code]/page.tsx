@@ -13,6 +13,7 @@ import TeamAssign from "@/components/TeamAssign";
 import Avatar from "@/components/Avatar";
 import Modal from "@/components/Modal";
 import Toast from "@/components/Toast";
+import ProgressStat from "@/components/ProgressStat";
 
 function SpeakerIcon({ muted, className }: { muted: boolean; className?: string }) {
   return (
@@ -616,7 +617,7 @@ export default function RoomPage() {
             <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
               {isCrosser ? (
                 <>
-                  <h2 className="text-xl font-semibold text-center">
+                  <h2 className="inline-block text-sm font-medium text-[var(--accent)] bg-[var(--accent-soft)] px-4 py-1.5 rounded-full">
                     {openFinderIds.length > 0
                       ? "Pick a number to hide"
                       : "Waiting for the round to start…"}
@@ -658,17 +659,9 @@ export default function RoomPage() {
             <div className="w-full flex flex-col items-center gap-4 animate-fade-in">
               {isCrosser && myGrid && (
                 <>
-                  <h2 className="text-xl font-semibold text-center">
+                  <h2 className="inline-block text-sm font-medium text-[var(--accent)] bg-[var(--accent-soft)] px-4 py-1.5 rounded-full">
                     Cross the grid before they find the number!
                   </h2>
-                  <p className="text-sm text-[var(--muted)]">
-                    {myGrid.filter(Boolean).length} / {myGrid.length} crossed
-                  </p>
-                  {state.finderIds.length > 1 && (
-                    <p className="text-sm text-[var(--muted)]">
-                      {state.foundIds.length} / {state.finderIds.length} found their number
-                    </p>
-                  )}
                   <CrossGrid
                     grid={myGrid}
                     onSquareClick={handleCrossSquare}
@@ -676,6 +669,20 @@ export default function RoomPage() {
                     eggIndices={myEggIndices}
                     crackedIndices={crackedIndices}
                   />
+                  <div className="w-full max-w-lg flex flex-row flex-wrap justify-between gap-4">
+                    <ProgressStat
+                      label="Your progress"
+                      current={myGrid.filter(Boolean).length}
+                      total={myGrid.length}
+                    />
+                    {state.finderIds.length > 1 && (
+                      <ProgressStat
+                        label="Found their number"
+                        current={state.foundIds.length}
+                        total={state.finderIds.length}
+                      />
+                    )}
+                  </div>
                 </>
               )}
               {isFinder && myBoard && (
@@ -684,11 +691,6 @@ export default function RoomPage() {
                     <p className="text-sm text-[var(--muted)]">Find this number</p>
                     <p className="text-4xl font-bold text-[var(--accent)]">{myTarget}</p>
                   </div>
-                  {squaresTotal > 0 && (
-                    <p className="text-sm text-[var(--muted)]">
-                      {crosserNames}: {crossedTotal} / {squaresTotal} crossed
-                    </p>
-                  )}
                   <ScatterBoard
                     board={myBoard}
                     wrongValue={wrongValue}
@@ -696,6 +698,13 @@ export default function RoomPage() {
                     disabled={!revealed || submittingFound}
                     onTileClick={handleTileClick}
                   />
+                  {squaresTotal > 0 && (
+                    <ProgressStat
+                      label={`${crosserNames} crossed`}
+                      current={crossedTotal}
+                      total={squaresTotal}
+                    />
+                  )}
                 </>
               )}
             </div>
