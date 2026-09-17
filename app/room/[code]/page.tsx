@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useRoom } from "@/lib/RoomContext";
 import { isMuted, playSound, setMuted } from "@/lib/sounds";
+import { meetsSabotageThreshold } from "@/lib/gameLogic";
 import ScatterBoard from "@/components/ScatterBoard";
 import CrossGrid from "@/components/CrossGrid";
 import Countdown from "@/components/Countdown";
@@ -64,6 +65,7 @@ export default function RoomPage() {
     kickPlayer,
     makeHost,
     endGame,
+    sabotage,
   } = useRoom();
 
   const [joining, setJoining] = useState(false);
@@ -78,6 +80,13 @@ export default function RoomPage() {
   const [muted, setMutedState] = useState(() => isMuted());
   const [confirmAction, setConfirmAction] = useState<"leave" | "end-game" | null>(null);
   const [waitingNotice, setWaitingNotice] = useState<string | null>(null);
+  const [crackedIndices, setCrackedIndices] = useState<number[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const [sabotagePickerOpen, setSabotagePickerOpen] = useState(false);
+  const [eggFlights, setEggFlights] = useState<{ id: number; dx: number; dy: number; delay: number }[]>(
+    []
+  );
+  const eggFlightIdRef = useRef(0);
 
   const handleCopyCode = async () => {
     try {
@@ -171,6 +180,42 @@ export default function RoomPage() {
     }
     seenWaitingIdsRef.current = currentIds;
   }, [state]);
+
+  // Re-render every second so sabotage cooldowns and live eggs, which expire
+  // purely by wall-clock comparison with no state change to trigger on, stay
+  // visually fresh without needing their own timers.
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // A square flipping from crossed back to uncrossed can only happen when a
+  // sabotage egg cracks — detect that by diffing our own grid across state
+  // updates rather than duplicating the server's egg/radius logic.
+  const prevGridRef = useRef<boolean[] | null>(null);
+  useEffect(() => {
+    if (!state || !playerId) {
+      prevGridRef.current = null;
+      return;
+    }
+    const grid = state.grids[playerId];
+    if (!grid) {
+      prevGridRef.current = null;
+      return;
+    }
+    const prev = prevGridRef.current;
+    if (prev && prev.length === grid.length) {
+      const flippedOff: number[] = [];
+      for (let i = 0; i < grid.length; i++) {
+        if (prev[i] && !grid[i]) flippedOff.push(i);
+      }
+      if (flippedOff.length > 0) {
+        setCrackedIndices(flippedOff);
+        setTimeout(() => setCrackedIndices([]), 500);
+      }
+    }
+    prevGridRef.current = grid;
+  }, [state, playerId]);
 
   // Play win/lose exactly once per game-over.
   const gameoverHandledRef = useRef(false);
@@ -336,6 +381,14 @@ export default function RoomPage() {
   const myTarget = playerId ? state.targets[playerId] : undefined;
   const showCountdown = state.phase === "active" && !!state.countdownUntil && !revealed;
 
+  const myEggs = playerId ? state.eggs[playerId] : undefined;
+  const myEggIndices = myEggs && myEggs.expiresAt > now ? myEggs.indices : [];
+  const eligibleSabotageTargets = state.config.sabotage
+    ? state.crosserIds.filter((id) => meetsSabotageThreshold(state.grids[id] ?? []))
+    : [];
+  const sabotageReadyAt = playerId ? state.sabotageCooldowns[playerId] ?? 0 : 0;
+  const sabotageCooldownRemaining = Math.max(0, sabotageReadyAt - now);
+
   const nameOf = (id: string) =>
     state.players.find((p) => p.id === id)?.name ??
     state.waiting.find((p) => p.id === id)?.name ??
@@ -384,8 +437,41 @@ export default function RoomPage() {
   };
 
   const handleCrossSquare = (index: number) => {
-    if (myGrid && !myGrid[index]) playSound("cross");
+    if (myGrid && !myGrid[index]) {
+      playSound(myEggIndices.includes(index) ? "crack" : "cross");
+    }
     crossSquare(index);
+  };
+
+  const triggerEggFly = () => {
+    const batch = Array.from({ length: 4 }, () => {
+      eggFlightIdRef.current += 1;
+      return {
+        id: eggFlightIdRef.current,
+        dx: Math.round((Math.random() - 0.5) * 160),
+        dy: -Math.round(200 + Math.random() * 160),
+        delay: Math.round(Math.random() * 150),
+      };
+    });
+    setEggFlights((prev) => [...prev, ...batch]);
+    setTimeout(() => {
+      setEggFlights((prev) => prev.filter((e) => !batch.some((b) => b.id === e.id)));
+    }, 1200);
+  };
+
+  const handleSabotage = (targetId: string) => {
+    playSound("sabotage");
+    triggerEggFly();
+    sabotage(targetId);
+    setSabotagePickerOpen(false);
+  };
+
+  const handleSabotageButtonClick = () => {
+    if (eligibleSabotageTargets.length === 1) {
+      handleSabotage(eligibleSabotageTargets[0]);
+    } else {
+      setSabotagePickerOpen(true);
+    }
   };
 
   const handleScatterPick = (value: number) => {
@@ -583,7 +669,13 @@ export default function RoomPage() {
                       {state.foundIds.length} / {state.finderIds.length} found their number
                     </p>
                   )}
-                  <CrossGrid grid={myGrid} onSquareClick={handleCrossSquare} disabled={!revealed} />
+                  <CrossGrid
+                    grid={myGrid}
+                    onSquareClick={handleCrossSquare}
+                    disabled={!revealed}
+                    eggIndices={myEggIndices}
+                    crackedIndices={crackedIndices}
+                  />
                 </>
               )}
               {isFinder && myBoard && (
@@ -630,6 +722,57 @@ export default function RoomPage() {
           )}
         </div>
       </div>
+
+      {isFinder && state.phase === "active" && eligibleSabotageTargets.length > 0 && (
+        <button
+          type="button"
+          disabled={!revealed || sabotageCooldownRemaining > 0}
+          onClick={handleSabotageButtonClick}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-[var(--danger)] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl transition-transform active:scale-95 disabled:opacity-50 animate-pop-in"
+        >
+          Sabotage <span className="text-lg leading-none">😈</span>
+          {sabotageCooldownRemaining > 0 && (
+            <span className="rounded-full bg-black/20 px-2 py-0.5 text-xs">
+              {Math.ceil(sabotageCooldownRemaining / 1000)}s
+            </span>
+          )}
+        </button>
+      )}
+
+      {eggFlights.map((e) => (
+        <span
+          key={e.id}
+          className="fixed bottom-9 right-11 z-40 text-2xl pointer-events-none animate-egg-fly"
+          style={
+            {
+              "--egg-dx": `${e.dx}px`,
+              "--egg-dy": `${e.dy}px`,
+              animationDelay: `${e.delay}ms`,
+            } as React.CSSProperties
+          }
+        >
+          🥚
+        </span>
+      ))}
+
+      <Modal open={sabotagePickerOpen} onClose={() => setSabotagePickerOpen(false)}>
+        <div className="flex flex-col items-center gap-4">
+          <span className="rounded-full bg-[var(--danger)]/10 px-2 py-1 text-[10px] font-bold tracking-widest text-[var(--danger)]">
+            SABOTAGE
+          </span>
+          <div className="flex flex-wrap justify-center gap-4">
+            {eligibleSabotageTargets.map((id) => (
+              <Avatar
+                key={id}
+                id={id}
+                name={nameOf(id)}
+                size={88}
+                onClick={() => handleSabotage(id)}
+              />
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={!!managingId} onClose={() => setManagingId(null)}>
         {managingId && (

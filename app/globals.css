@@ -143,3 +143,11 @@ body {
 .animate-toast-in {
   animation: toast-in 0.2s ease-out;
 }
+
+@keyframes egg-fly {
+  0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--egg-dx), var(--egg-dy)) scale(0.4) rotate(360deg); opacity: 0; }
+}
+.animate-egg-fly {
+  animation: egg-fly 0.9s ease-out forwards;
+}

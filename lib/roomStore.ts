@@ -13,6 +13,9 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   // room saved by a previous deploy doesn't crash on the new shape.
   if (!data.waiting) data.waiting = [];
   if (!data.expiresAt) data.expiresAt = Date.now() + ROOM_LIFETIME_MS;
+  if (!data.eggs) data.eggs = {};
+  if (!data.sabotageCooldowns) data.sabotageCooldowns = {};
+  if (data.config && data.config.sabotage === undefined) data.config.sabotage = false;
   return data;
 }
 

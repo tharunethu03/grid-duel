@@ -4,6 +4,8 @@ import {
   MAX_NUMBER_RANGE,
   MIN_GRID_SIZE,
   MAX_GRID_SIZE,
+  SABOTAGE_THRESHOLD_NUM,
+  SABOTAGE_THRESHOLD_DEN,
 } from "./types";
 
 export function shuffledBoard(numberRange: number): number[] {
@@ -113,6 +115,64 @@ export function randomizeTeamAssignment(players: Player[]): void {
   shuffled.forEach((p, i) => {
     p.teamId = i % 2 === 0 ? "A" : "B";
   });
+}
+
+// True once a crosser has crossed at least SABOTAGE_THRESHOLD_NUM/DEN of
+// their grid — checked with integer math (crossed*den >= len*num) so it's
+// exact regardless of grid size.
+export function meetsSabotageThreshold(grid: boolean[]): boolean {
+  if (grid.length === 0) return false;
+  const crossed = grid.filter(Boolean).length;
+  return crossed * SABOTAGE_THRESHOLD_DEN >= grid.length * SABOTAGE_THRESHOLD_NUM;
+}
+
+// A crack's radius scales in coarse tiers with grid size — a fixed radius of
+// 1 would wipe out most of a small grid's progress but barely register on a
+// huge one, so bigger grids get a wider blast to keep the setback meaningful.
+export function sabotageRadiusFor(gridSize: number): number {
+  if (gridSize <= 30) return 1;
+  if (gridSize <= 150) return 2;
+  return 3;
+}
+
+// Egg count scales the same way, roughly one egg per ~12 squares, clamped to
+// a sane range so it's never a single lonely egg nor an overwhelming field.
+export function sabotageEggCountFor(gridSize: number): number {
+  return Math.min(15, Math.max(3, Math.round(gridSize / 12)));
+}
+
+// Randomly selects up to `count` of the crosser's still-empty squares to
+// plant eggs on.
+export function pickSabotageIndices(grid: boolean[], count: number): number[] {
+  const empty: number[] = [];
+  for (let i = 0; i < grid.length; i++) if (!grid[i]) empty.push(i);
+  for (let i = empty.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [empty[i], empty[j]] = [empty[j], empty[i]];
+  }
+  return empty.slice(0, Math.min(count, empty.length));
+}
+
+// Crosses `index` (assumed to hold a live egg — always empty beforehand,
+// since eggs only ever land on empty squares and an already-crossed square
+// can't be clicked) and clears any already-crossed squares in a radius
+// around it that scales with grid size, sending that progress back to zero.
+export function applySabotageCrack(grid: boolean[], index: number): void {
+  grid[index] = true;
+  const radius = sabotageRadiusFor(grid.length);
+  const cols = Math.ceil(Math.sqrt(grid.length));
+  const row = Math.floor(index / cols);
+  const col = index % cols;
+  for (let dr = -radius; dr <= radius; dr++) {
+    for (let dc = -radius; dc <= radius; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const r = row + dr;
+      const c = col + dc;
+      if (r < 0 || c < 0 || c >= cols) continue;
+      const ni = r * cols + c;
+      if (ni >= 0 && ni < grid.length) grid[ni] = false;
+    }
+  }
 }
 
 export function makeRoomCode(): string {

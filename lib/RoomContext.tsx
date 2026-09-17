@@ -51,6 +51,7 @@ interface RoomContextValue {
   kickPlayer: (targetId: string) => void;
   makeHost: (targetId: string) => void;
   endGame: () => void;
+  sabotage: (targetId: string) => void;
 }
 
 const RoomContext = createContext<RoomContextValue | null>(null);
@@ -193,6 +194,10 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     [withRoom]
   );
   const endGame = useCallback(() => withRoom("end-game"), [withRoom]);
+  const sabotage = useCallback(
+    (targetId: string) => withRoom("sabotage", { targetId }),
+    [withRoom]
+  );
   const leaveRoom = useCallback(() => {
     withRoom("leave");
     teardown();
@@ -226,6 +231,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
         kickPlayer,
         makeHost,
         endGame,
+        sabotage,
       }}
     >
       {children}

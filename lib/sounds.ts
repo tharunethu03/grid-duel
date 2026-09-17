@@ -10,7 +10,9 @@ export type SoundKind =
   | "correct"
   | "wrong"
   | "win"
-  | "lose";
+  | "lose"
+  | "sabotage"
+  | "crack";
 
 const MUTE_KEY = "gd-muted";
 
@@ -102,6 +104,16 @@ function playInternal(kind: SoundKind, audio: AudioContext) {
       tone(audio, { freq: 300, endFreq: 220, start: 0, duration: 0.22, type: "sawtooth", peakGain: 0.16 });
       tone(audio, { freq: 260, endFreq: 190, start: 0.28, duration: 0.22, type: "sawtooth", peakGain: 0.16 });
       tone(audio, { freq: 220, endFreq: 130, start: 0.56, duration: 0.4, type: "sawtooth", peakGain: 0.18 });
+      break;
+    case "sabotage":
+      // a mischievous little "plant the trap" blip
+      tone(audio, { freq: 700, endFreq: 500, start: 0, duration: 0.08, type: "square", peakGain: 0.14 });
+      tone(audio, { freq: 500, endFreq: 350, start: 0.09, duration: 0.1, type: "square", peakGain: 0.14 });
+      break;
+    case "crack":
+      // a sharp eggshell snap
+      tone(audio, { freq: 950, endFreq: 110, start: 0, duration: 0.12, type: "sawtooth", peakGain: 0.2 });
+      tone(audio, { freq: 200, endFreq: 90, start: 0.02, duration: 0.14, type: "square", peakGain: 0.12 });
       break;
   }
 }

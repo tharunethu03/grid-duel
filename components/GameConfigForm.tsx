@@ -352,6 +352,28 @@ export default function GameConfigForm({
           />
         </button>
       </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">Sabotage 🥚</p>
+          <p className="text-xs text-[var(--muted)]">
+            Finders can plant eggs on a crosser who&apos;s 2/3 done
+          </p>
+        </div>
+        <button
+          disabled={!editable}
+          onClick={() => onChange({ sabotage: !config.sabotage })}
+          className={`relative h-7 w-12 rounded-full transition-colors shrink-0 ${
+            config.sabotage ? "bg-[var(--accent)]" : "bg-[var(--border)]"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
+              config.sabotage ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
     </div>
   );
 }

@@ -9,6 +9,10 @@ import {
   assignInitialRoles,
   advanceRound,
   randomizeTeamAssignment,
+  meetsSabotageThreshold,
+  pickSabotageIndices,
+  applySabotageCrack,
+  sabotageEggCountFor,
 } from "@/lib/gameLogic";
 import {
   COUNTDOWN_MS,
@@ -16,6 +20,8 @@ import {
   DEFAULT_CONFIG,
   MAX_PLAYERS,
   ROOM_LIFETIME_MS,
+  SABOTAGE_EGG_DURATION_MS,
+  SABOTAGE_COOLDOWN_MS,
   RoomState,
   Player,
   TeamId,
@@ -47,6 +53,8 @@ function resetRound(room: RoomState) {
   room.foundIds = [];
   room.roundStartCrossed = {};
   room.countdownUntil = null;
+  room.eggs = {};
+  room.sabotageCooldowns = {};
 }
 
 function admitWaitlist(room: RoomState) {
@@ -95,6 +103,8 @@ export async function POST(
         countdownUntil: null,
         boards: {},
         grids: {},
+        eggs: {},
+        sabotageCooldowns: {},
         winnerId: null,
         expiresAt: Date.now() + ROOM_LIFETIME_MS,
         updatedAt: Date.now(),
@@ -223,7 +233,21 @@ export async function POST(
       const grid = room.grids[player.id];
       if (!grid || index < 0 || index >= grid.length || grid[index])
         return bad("Invalid square");
-      grid[index] = true;
+
+      const egg = room.eggs[player.id];
+      const hitEgg = !!egg && egg.expiresAt > Date.now() && egg.indices.includes(index);
+      if (hitEgg && egg) {
+        applySabotageCrack(grid, index);
+        const remaining = egg.indices.filter((i) => i !== index);
+        if (remaining.length > 0) {
+          room.eggs[player.id] = { indices: remaining, expiresAt: egg.expiresAt };
+        } else {
+          delete room.eggs[player.id];
+        }
+      } else {
+        grid[index] = true;
+      }
+
       if (grid.every(Boolean)) {
         room.phase = "gameover";
         room.winnerId = player.id;
@@ -333,6 +357,32 @@ export async function POST(
       admitWaitlist(room);
       resetRound(room);
       room.winnerId = null;
+      await saveRoom(room);
+      return NextResponse.json({ ok: true });
+    }
+
+    case "sabotage": {
+      const { room, player, error } = await loadAndAuthorize(body);
+      if (error || !room || !player) return bad(error || "Not found", 404);
+      if (!room.config.sabotage) return bad("Sabotage is disabled");
+      if (room.phase !== "active") return bad("Not active");
+      if (!room.finderIds.includes(player.id)) return bad("Not your turn", 403);
+      if (!room.countdownUntil || Date.now() < room.countdownUntil - COUNTDOWN_GRACE_MS)
+        return bad("Wait for countdown");
+      const now = Date.now();
+      if (now < (room.sabotageCooldowns[player.id] ?? 0)) {
+        return bad("Sabotage is on cooldown");
+      }
+      const targetId = String(body.targetId || "");
+      if (!room.crosserIds.includes(targetId)) return bad("Invalid target", 404);
+      const grid = room.grids[targetId];
+      if (!grid || !meetsSabotageThreshold(grid)) {
+        return bad("Target hasn't crossed enough squares yet");
+      }
+      const indices = pickSabotageIndices(grid, sabotageEggCountFor(grid.length));
+      if (indices.length === 0) return bad("No squares left to sabotage");
+      room.eggs[targetId] = { indices, expiresAt: now + SABOTAGE_EGG_DURATION_MS };
+      room.sabotageCooldowns[player.id] = now + SABOTAGE_COOLDOWN_MS;
       await saveRoom(room);
       return NextResponse.json({ ok: true });
     }
